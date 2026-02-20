@@ -18,8 +18,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load Environment Variables
-load_dotenv()
+# Load Environment Variables (from .env file locally, system env on Railway)
+load_dotenv()  # No-op if .env doesn't exist (e.g., on Railway)
+
+import time
 
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -29,12 +31,14 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 600))
 
 # Initialize OpenAI Client for xAI
 if not XAI_API_KEY:
-    logger.error("XAI_API_KEY is missing via .env")
+    logger.error("XAI_API_KEY is missing. Set it in .env (local) or as an environment variable (Railway).")
+    logger.error("Available env vars: " + ", ".join([k for k in os.environ.keys() if not k.startswith("_")]))
+    time.sleep(10)  # Prevent rapid crash-restart loop on Railway
     exit(1)
 
 if XAI_API_KEY.startswith("your_") or "xai_api_key_here" in XAI_API_KEY:
-    logger.error("❌ Invalid API Key detected! Please update .env with your actual xAI API key.")
-    logger.error("   Open the .env file and replace 'your_xai_api_key_here' with your real key.")
+    logger.error("❌ Invalid API Key detected! Please update with your actual xAI API key.")
+    time.sleep(10)
     exit(1)
 
 client = openai.AsyncOpenAI(
