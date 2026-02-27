@@ -196,8 +196,14 @@ async def send_notification(item: Dict[str, str]) -> bool:
     image_url = item.get("image_url", "")
     
     caption = f"<b>JUST IN:</b> {headline}\n\n"
+    
+    # Footer links: Source | Follow us | Trade now
+    footer_parts = []
     if url:
-        caption += f"<a href='{url}'>Source</a>"
+        footer_parts.append(f"<a href='{url}'>Source</a>")
+    footer_parts.append("<a href='https://x.com/predictall_'>Follow us</a>")
+    footer_parts.append("<a href='https://polymarket.com/?via=samuel-yfxo'>Trade now</a>")
+    caption += " | ".join(footer_parts)
 
     try:
         if image_url:
