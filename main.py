@@ -127,6 +127,21 @@ BLOCKED_IMAGE_DOMAINS = [
     "news.google.com",
 ]
 
+# Blocklist for headlines that should never be sent
+# Each entry is checked case-insensitively against the headline
+BLOCKED_HEADLINE_PATTERNS = [
+    "bitcoin up or down",
+]
+
+def should_skip_headline(headline: str) -> bool:
+    """Check if a headline matches any blocked pattern."""
+    headline_lower = headline.lower()
+    for pattern in BLOCKED_HEADLINE_PATTERNS:
+        if pattern in headline_lower:
+            logger.info(f"⛔ Blocked headline: {headline}")
+            return True
+    return False
+
 def is_valid_article_image(image_url: str) -> bool:
     """Check if the image URL is a real article image, not a generic logo."""
     if not image_url:
@@ -305,6 +320,10 @@ async def fetch_updates(topic: str) -> List[Dict[str, str]]:
         for item in news_items:
             url = item.get("url", "")
             headline = item.get("headline", "")
+            
+            # Skip blocked headlines (e.g., "Bitcoin Up or Down" spam)
+            if should_skip_headline(headline):
+                continue
             
             # Resolve Google News redirect URL to the REAL article URL
             if url and 'news.google.com' in url:
