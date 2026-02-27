@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sqlite3
+import re
 import os
 import logging
 from typing import List, Dict, Optional
@@ -49,6 +50,52 @@ client = openai.AsyncOpenAI(
 # Database Setup
 DB_FILE = "bot_memory.db"
 
+# Stop words to ignore when comparing headlines
+STOP_WORDS = {
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as',
+    'and', 'or', 'but', 'not', 'so', 'if', 'it', 'its', 'this', 'that',
+    'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+    'should', 'may', 'can', 'up', 'down', 'out', 'about', 'into', 'over',
+    'after', 'before', 'new', 'says', 'said', 'just', 'more', 'how', 'what',
+    'who', 'why', 'when', 'where', 'than', 'also', 'no', 'all', 'any',
+}
+
+SIMILARITY_THRESHOLD = 0.6  # 60% keyword overlap = same story
+
+def normalize_headline(headline: str) -> set:
+    """Extract significant keywords from a headline."""
+    words = re.findall(r'[a-z0-9]+', headline.lower())
+    return {w for w in words if w not in STOP_WORDS and len(w) > 1}
+
+def headline_similarity(headline_a: str, headline_b: str) -> float:
+    """Calculate Jaccard similarity between two headlines."""
+    words_a = normalize_headline(headline_a)
+    words_b = normalize_headline(headline_b)
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union)
+
+def is_similar_to_recent(headline: str, days: int = 7) -> bool:
+    """Check if a headline is too similar to any recently sent headline."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT headline FROM seen_items WHERE headline IS NOT NULL AND timestamp > datetime("now", ?)',
+        (f'-{days} days',)
+    )
+    recent_headlines = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    
+    for past_headline in recent_headlines:
+        score = headline_similarity(headline, past_headline)
+        if score >= SIMILARITY_THRESHOLD:
+            logger.info(f"⛔ Similar headline detected ({score:.0%}): \"{headline}\" ≈ \"{past_headline}\"")
+            return True
+    return False
+
 def init_db():
     """Initialize the SQLite database for deduplication."""
     conn = sqlite3.connect(DB_FILE)
@@ -56,9 +103,15 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS seen_items (
             id TEXT PRIMARY KEY,
+            headline TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # Add headline column if upgrading from old schema
+    try:
+        cursor.execute('ALTER TABLE seen_items ADD COLUMN headline TEXT')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -71,12 +124,12 @@ def is_seen(item_id: str) -> bool:
     conn.close()
     return result is not None
 
-def mark_seen(item_id: str):
-    """Mark an item ID as processed."""
+def mark_seen(item_id: str, headline: str = None):
+    """Mark an item ID as processed, storing the headline for similarity checks."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
-        cursor.execute('INSERT INTO seen_items (id) VALUES (?)', (item_id,))
+        cursor.execute('INSERT INTO seen_items (id, headline) VALUES (?, ?)', (item_id, headline))
         conn.commit()
     except sqlite3.IntegrityError:
         pass # Already exists
@@ -387,9 +440,16 @@ async def main():
                     continue
                 
                 if not is_seen(item_id):
+                    headline = item.get("headline", "")
+                    
+                    # Skip if too similar to a recently sent headline
+                    if is_similar_to_recent(headline):
+                        mark_seen(item_id, headline)  # Still mark as seen to avoid rechecking
+                        continue
+                    
                     logger.info(f"New item found: {item_id}")
                     if await send_notification(item):
-                        mark_seen(item_id)
+                        mark_seen(item_id, headline)
                         new_count += 1
             
             if new_count == 0:
