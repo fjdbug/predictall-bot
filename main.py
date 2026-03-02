@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from telegram import Bot, constants
 from telegram.error import TelegramError
 
+from twitter_client import init_twitter_client, post_tweet
+
 # Configure Logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -422,7 +424,15 @@ async def main():
     """Main async loop."""
     logger.info("🤖 Bot started. Initializing database...")
     init_db()
-    logger.info(f"👀 Monitoring topic: {WATCH_TOPIC}")
+
+    # Initialize Twitter client
+    twitter_client = init_twitter_client()
+    if twitter_client:
+        logger.info("Twitter posting is ENABLED.")
+    else:
+        logger.info("Twitter posting is DISABLED (missing credentials or disabled).")
+    
+    logger.info(f"�� Monitoring topic: {WATCH_TOPIC}")
     logger.info(f"⏱️ Poll interval: {POLL_INTERVAL} seconds")
 
     while True:
@@ -451,6 +461,10 @@ async def main():
                     if await send_notification(item):
                         mark_seen(item_id, headline)
                         new_count += 1
+
+                        # Also tweet this news item with image (no link)
+                        tweet_image = item.get("image_url", "")
+                        post_tweet(twitter_client, headline, tweet_image)
             
             if new_count == 0:
                 logger.info("No new updates found.")
