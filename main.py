@@ -420,6 +420,74 @@ async def fetch_updates(topic: str) -> List[Dict[str, str]]:
         logger.error(f"Error fetching updates: {e}")
         return []
 
+
+async def fetch_twitter_updates() -> List[Dict[str, str]]:
+    """Fetch trending prediction market updates from X/Twitter via Grok's real-time access."""
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
+    try:
+        logger.info("Fetching X/Twitter updates via Grok...")
+        
+        completion = await client.chat.completions.create(
+            model="grok-4-fast-reasoning",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are a prediction market news aggregator with access to real-time X/Twitter data. Today is {current_date}. "
+                        "Search X/Twitter for the most recent and trending posts about prediction markets, "
+                        "including but not limited to: Polymarket, Kalshi, Metaculus, PredictIt, and general prediction market news. "
+                        "Focus on posts from the last few hours that contain breaking news, major market movements, or significant events. "
+                        "Return a JSON object with a single key 'news' which is a list of objects. "
+                        "Each object must have: "
+                        "- 'headline': A concise, factual headline summarizing the tweet/post (NOT the raw tweet text). "
+                        "- 'url': The direct URL to the tweet/post on X (e.g. https://x.com/username/status/12345). "
+                        "Only include items that are genuinely newsworthy. Do not include promotional or spam posts. "
+                        "Do not include any text outside the JSON object. "
+                        "If no relevant results are found, return an empty news list like {"news": []}."
+                    )
+                },
+                {"role": "user", "content": "Find the latest trending prediction market news on X/Twitter right now."}
+            ],
+            temperature=0.2,
+        )
+
+        response_content = completion.choices[0].message.content.strip()
+        # Handle potential markdown code blocks
+        if response_content.startswith("```json"):
+            response_content = response_content[7:]
+        if response_content.endswith("```"):
+            response_content = response_content[:-3]
+        
+        data = json.loads(response_content.strip())
+        news_items = data.get("news", [])
+        
+        # Process items - generate IDs and filter
+        processed_items = []
+        for item in news_items:
+            url = item.get("url", "")
+            headline = item.get("headline", "")
+            
+            if should_skip_headline(headline):
+                continue
+            
+            # Create a deterministic ID based on the URL or headline
+            if url:
+                item_id = hashlib.md5(url.encode()).hexdigest()
+            else:
+                item_id = hashlib.md5(headline.encode()).hexdigest()
+                
+            item["id"] = item_id
+            item["source"] = "twitter"
+            processed_items.append(item)
+            
+        logger.info(f"Found {len(processed_items)} items from X/Twitter via Grok.")
+        return processed_items
+
+    except Exception as e:
+        logger.error(f"Error fetching X/Twitter updates: {e}")
+        return []
+
 async def main():
     """Main async loop."""
     logger.info("🤖 Bot started. Initializing database...")
@@ -441,7 +509,11 @@ async def main():
             cleanup_old_records(30)
             
             logger.info("Fetching updates...")
-            updates = await fetch_updates(WATCH_TOPIC)
+            # Fetch from both sources
+            rss_updates = await fetch_updates(WATCH_TOPIC)
+            twitter_updates = await fetch_twitter_updates()
+            updates = rss_updates + twitter_updates
+            logger.info(f"Total items: {len(rss_updates)} from RSS + {len(twitter_updates)} from X/Twitter")
             
             new_count = 0
             for item in updates:
