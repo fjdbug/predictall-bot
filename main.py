@@ -444,7 +444,7 @@ async def fetch_twitter_updates() -> List[Dict[str, str]]:
                         "- 'url': The direct URL to the tweet/post on X (e.g. https://x.com/username/status/12345). "
                         "Only include items that are genuinely newsworthy. Do not include promotional or spam posts. "
                         "Do not include any text outside the JSON object. "
-                        "If no relevant results are found, return an empty news list like {"news": []}."
+                        "If no relevant results are found, return an empty news list like {'news': []}."
                     )
                 },
                 {"role": "user", "content": "Find the latest trending prediction market news on X/Twitter right now."}
