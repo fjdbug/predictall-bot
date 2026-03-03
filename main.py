@@ -471,6 +471,12 @@ async def fetch_twitter_updates() -> List[Dict[str, str]]:
             if should_skip_headline(headline):
                 continue
             
+            # Validate URL before processing — Grok can hallucinate tweet URLs
+            if url:
+                if not await validate_url(url):
+                    logger.warning(f"Skipping invalid X/Twitter link: {url}")
+                    continue
+            
             # Create a deterministic ID based on the URL or headline
             if url:
                 item_id = hashlib.md5(url.encode()).hexdigest()
